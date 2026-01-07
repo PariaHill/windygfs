@@ -9,28 +9,26 @@ from plotly.subplots import make_subplots
 # 1. 페이지 설정
 st.set_page_config(page_title="Windy Marine Forecast", layout="wide")
 
-# 2. 세션 상태 초기화
+# 2. 세션 상태 및 API 설정
 if 'lat' not in st.session_state: st.session_state.lat = 31.8700
 if 'lon' not in st.session_state: st.session_state.lon = 126.7700
 if 'offset' not in st.session_state: st.session_state.offset = 9
 
-# 3. API 및 상수 설정
 API_KEY = st.secrets["WINDY_API_KEY"]
 BASE_URL = "https://api.windy.com/api/point-forecast/v2"
 MS_TO_KNOTS = 1.94384
 
-# 4. 유틸리티 함수
+# 3. 유틸리티 함수
 def get_wind_direction_text(deg):
     directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
     idx = int((deg + 11.25) / 22.5) % 16
     return directions[idx]
 
 def get_wind_arrow_html(deg):
-    """불어오는 쪽 기준 정밀 화살표 (N:0도 -> ↑)"""
     rotate_deg = deg 
     return f'<span style="display:inline-block; transform:rotate({rotate_deg}deg); font-size:18px; color:#007BFF; margin-left:5px;">↑</span>'
 
-# 5. UI 상단
+# 4. UI 상단
 st.title("⚓ 실시간 해상 기상 관측 시스템")
 
 with st.container():
@@ -47,37 +45,25 @@ with st.container():
         fetch_btn = st.button("데이터 수신", use_container_width=True)
 
 if fetch_btn:
-    with st.spinner("해상 데이터를 분석 중..."):
-        gfs_payload = {
-            "lat": st.session_state.lat, "lon": st.session_state.lon, "model": "gfs",
-            "parameters": ["pressure", "wind", "windGust"],
-            "levels": ["surface", "surface", "surface"], "key": API_KEY
-        }
-        wave_payload = {
-            "lat": st.session_state.lat, "lon": st.session_state.lon, "model": "gfsWave",
-            "parameters": ["waves", "swell1"],
-            "levels": ["surface", "surface"], "key": API_KEY
-        }
+    with st.spinner("데이터 분석 중..."):
+        gfs_payload = {"lat": st.session_state.lat, "lon": st.session_state.lon, "model": "gfs", "parameters": ["pressure", "wind", "windGust"], "levels": ["surface"] * 3, "key": API_KEY}
+        wave_payload = {"lat": st.session_state.lat, "lon": st.session_state.lon, "model": "gfsWave", "parameters": ["waves", "swell1"], "levels": ["surface"] * 2, "key": API_KEY}
 
         r_gfs = requests.post(BASE_URL, json=gfs_payload)
         r_wave = requests.post(BASE_URL, json=wave_payload)
 
         if r_gfs.status_code == 200 and r_wave.status_code == 200:
-            data_gfs = r_gfs.json()
-            data_wave = r_wave.json()
+            data_gfs, data_wave = r_gfs.json(), r_wave.json()
+            def sanitize(data_list): return [x if x is not None else 0.0 for x in data_list]
 
-            def sanitize(data_list):
-                return [x if x is not None else 0.0 for x in data_list]
-
-            limit = 56 # 7일치
+            limit = 56
             times = [datetime.fromtimestamp(t/1000) + timedelta(hours=(st.session_state.offset - 9)) for t in data_gfs.get('ts', [])[:limit]]
-            time_col_name = f"Time (UTC{st.session_state.offset:+} )"
+            time_col = f"Time (UTC{st.session_state.offset:+} )"
 
             df = pd.DataFrame({
-                time_col_name: times,
+                time_col: times,
                 "Pressure(hPa)": [round(p/100, 1) for p in data_gfs.get('pressure-surface', [])[:limit]],
-                "Wind_U": data_gfs.get('wind_u-surface', [])[:limit],
-                "Wind_V": data_gfs.get('wind_v-surface', [])[:limit],
+                "Wind_U": data_gfs.get('wind_u-surface', [])[:limit], "Wind_V": data_gfs.get('wind_v-surface', [])[:limit],
                 "Gust(kts)": [round(g * MS_TO_KNOTS, 1) for g in sanitize(data_gfs.get('gust-surface', [])[:limit])],
                 "Waves(m)": [round(w, 1) for w in sanitize(data_wave.get('waves_height-surface', [])[:limit])],
                 "Swell(m)": [round(s, 1) for s in sanitize(data_wave.get('swell1_height-surface', [])[:limit])]
@@ -87,64 +73,36 @@ if fetch_btn:
             df['Wind_Deg'] = df.apply(lambda row: (math.degrees(math.atan2(row['Wind_U'], row['Wind_V'])) + 180) % 360, axis=1)
             df['Wind Direction'] = df.apply(lambda row: f"{row['Wind_Deg']:.1f}° {get_wind_direction_text(row['Wind_Deg'])} {get_wind_arrow_html(row['Wind_Deg'])}", axis=1)
 
-            display_df = df[[time_col_name, "Pressure(hPa)", "Wind Direction", "Wind Speed(kts)", "Gust(kts)", "Waves(m)", "Swell(m)"]]
-
             tab1, tab2 = st.tabs(["📊 데이터 테이블", "📈 시각화 그래프"])
-            
             with tab1:
-                st.subheader(f"7일 해상 예보 데이터 ({time_col_name})")
-                st.write(display_df.to_html(escape=False, index=False, justify='center'), unsafe_allow_html=True)
+                st.write(df[[time_col, "Pressure(hPa)", "Wind Direction", "Wind Speed(kts)", "Gust(kts)", "Waves(m)", "Swell(m)"]].to_html(escape=False, index=False, justify='center'), unsafe_allow_html=True)
 
             with tab2:
-                st.subheader("바람 및 파도 상세 분석 (7-Day)")
-                
-                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                                    vertical_spacing=0.15,
-                                    subplot_titles=("Wind Speed & Gust (kts)", "Wave & Swell Height (m)"))
+                # 2단 그래프 구성 (shared_xaxes=False로 변경하여 각각 날짜 표시)
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=False, vertical_spacing=0.2,
+                                    subplot_titles=("Wind Speed & Direction (kts)", "Wave & Swell Height (m)"))
 
-                # 상단: 바람 그래프
-                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Wind Speed(kts)'], name="Wind Speed", line=dict(color='firebrick', width=2)), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Gust(kts)'], name="Gust", line=dict(color='orange', width=1, dash='dot'), fill='tonexty'), row=1, col=1)
+                # 상단: 바람 그래프 + 3시간 간격 화살표
+                fig.add_trace(go.Scatter(x=df[time_col], y=df['Wind Speed(kts)'], name="Wind", line=dict(color='firebrick')), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df[time_col], y=df['Gust(kts)'], name="Gust", line=dict(color='orange', dash='dot'), fill='tonexty'), row=1, col=1)
 
-                # 상단 그래프에 정밀 화살표 추가 (가독성을 위해 6시간 간격으로 표시)
-                for i in range(0, len(df), 2):  # 3시간 간격 데이터이므로 2개마다=6시간
-                    fig.add_annotation(
-                        dict(
-                            x=df[time_col_name].iloc[i],
-                            y=df['Wind Speed(kts)'].max() * 1.15, # 그래프 상단 여백에 배치
-                            text="↑", # 기본 화살표
-                            showarrow=False,
-                            font=dict(size=16, color="#007BFF"),
-                            textangle=df['Wind_Deg'].iloc[i], # 1도 단위 정밀 회전
-                            xref="x", yref="y1"
-                        )
-                    )
+                for i in range(len(df)): # 3시간 간격 전체 표시
+                    fig.add_annotation(dict(x=df[time_col].iloc[i], y=df['Wind Speed(kts)'].max() * 1.2, text="↑", showarrow=False, 
+                                            font=dict(size=14, color="#007BFF"), textangle=df['Wind_Deg'].iloc[i], xref="x1", yref="y1"))
 
                 # 하단: 파도 그래프
-                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Waves(m)'], name="Waves", line=dict(color='royalblue', width=3)), row=2, col=1)
-                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Swell(m)'], name="Swell", line=dict(color='skyblue', width=2, dash='dash')), row=2, col=1)
+                fig.add_trace(go.Scatter(x=df[time_col], y=df['Waves(m)'], name="Waves", line=dict(color='royalblue', width=3)), row=2, col=1)
+                fig.add_trace(go.Scatter(x=df[time_col], y=df['Swell(m)'], name="Swell", line=dict(color='skyblue', dash='dash')), row=2, col=1)
 
-                # 날짜별 구분 배경선 (V-Bands)
-                unique_days = df[time_col_name].dt.date.unique()
-                for i, day in enumerate(unique_days):
+                # 공통 설정: 날짜 배경 및 X축 날짜 표시
+                for i, day in enumerate(df[time_col].dt.date.unique()):
                     if i % 2 == 0:
-                        fig.add_vrect(x0=str(day), x1=str(day + timedelta(days=1)), 
-                                      fillcolor="gray", opacity=0.07, layer="below", line_width=0)
+                        fig.add_vrect(x0=str(day), x1=str(day + timedelta(days=1)), fillcolor="gray", opacity=0.07, layer="below", line_width=0)
 
-                # 레이아웃 설정
-                fig.update_layout(height=800, hovermode="x unified", showlegend=True,
-                                  legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1))
-                
-                # X축 설정: 날짜와 시간 표시 최적화
-                fig.update_xaxes(
-                    tickformat="%d일\n%H:%M", 
-                    dtick=21600000, # 6시간 간격으로 그리드 표시 (ms 단위)
-                    showgrid=True, gridwidth=1, gridcolor='rgba(200,200,200,0.5)'
-                )
-                
-                # Y축 범위 조정 (화살표 공간 확보)
-                fig.update_yaxes(range=[0, df['Wind Speed(kts)'].max() * 1.3], row=1, col=1)
+                fig.update_layout(height=850, hovermode="x unified", legend=dict(orientation="h", y=1.05))
+                # 두 그래프 모두에 날짜/시간 표시 적용
+                fig.update_xaxes(tickformat="%d일\n%H:%M", dtick=21600000, showgrid=True, row=1, col=1)
+                fig.update_xaxes(tickformat="%d일\n%H:%M", dtick=21600000, showgrid=True, row=2, col=1)
+                fig.update_yaxes(range=[0, df['Wind Speed(kts)'].max() * 1.4], row=1, col=1)
                 
                 st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.error("데이터 수신 실패")
