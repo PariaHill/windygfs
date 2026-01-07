@@ -3,7 +3,8 @@ import requests
 import pandas as pd
 import math
 from datetime import datetime, timedelta
-import plotly.graph_objects as go  # NameError 해결을 위해 반드시 필요
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # 1. 페이지 설정
 st.set_page_config(page_title="Windy Marine Forecast", layout="wide")
@@ -25,9 +26,7 @@ def get_wind_direction_text(deg):
     return directions[idx]
 
 def get_wind_arrow_html(deg):
-    """불어오는 쪽을 가리키는 정밀 화살표 (N:0도 -> ↑)"""
     rotate_deg = deg 
-    # 테이블 내 간격을 위해 스타일을 한 줄로 정리
     return f'<span style="display:inline-block; transform:rotate({rotate_deg}deg); font-size:18px; color:#007BFF; margin-left:5px;">↑</span>'
 
 # 5. UI 상단
@@ -70,8 +69,6 @@ if fetch_btn:
                 return [x if x is not None else 0.0 for x in data_list]
 
             limit = 56 # 7일치
-            
-            # 시간 계산
             times = [datetime.fromtimestamp(t/1000) + timedelta(hours=(st.session_state.offset - 9)) for t in data_gfs.get('ts', [])[:limit]]
             time_col_name = f"Time (UTC{st.session_state.offset:+} )"
 
@@ -87,10 +84,7 @@ if fetch_btn:
 
             df['Wind Speed(kts)'] = (((df['Wind_U']**2 + df['Wind_V']**2)**0.5) * MS_TO_KNOTS).round(1)
             df['Wind_Deg'] = df.apply(lambda row: (math.degrees(math.atan2(row['Wind_U'], row['Wind_V'])) + 180) % 360, axis=1)
-            
-            # Wind Direction 컬럼 가공 (HTML 태그 포함)
-            df['Wind Direction'] = df.apply(lambda row: 
-                f"{row['Wind_Deg']:.1f}° {get_wind_direction_text(row['Wind_Deg'])} {get_wind_arrow_html(row['Wind_Deg'])}", axis=1)
+            df['Wind Direction'] = df.apply(lambda row: f"{row['Wind_Deg']:.1f}° {get_wind_direction_text(row['Wind_Deg'])} {get_wind_arrow_html(row['Wind_Deg'])}", axis=1)
 
             display_df = df[[time_col_name, "Pressure(hPa)", "Wind Direction", "Wind Speed(kts)", "Gust(kts)", "Waves(m)", "Swell(m)"]]
 
@@ -98,19 +92,37 @@ if fetch_btn:
             
             with tab1:
                 st.subheader(f"7일 해상 예보 데이터 ({time_col_name})")
-                # justify='center'와 render_links=False 등으로 깨끗한 HTML 생성
                 st.write(display_df.to_html(escape=False, index=False, justify='center'), unsafe_allow_html=True)
 
             with tab2:
-                st.subheader("풍속 및 파고 추이")
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Waves(m)'], name="파고 (m)", line=dict(color='royalblue', width=3)))
-                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Wind Speed(kts)'], name="풍속 (kts)", yaxis="y2", line=dict(color='firebrick', dash='dot')))
-                fig.update_layout(
-                    yaxis=dict(title="파고 (m)"),
-                    yaxis2=dict(title="풍속 (kts)", side="right", overlaying="y", showgrid=False),
-                    hovermode="x unified"
-                )
+                st.subheader("바람 및 파도 상세 분석 (7-Day)")
+                
+                # 2단 그래프 구성 (행 2개, 공유 X축)
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                                    vertical_spacing=0.1,
+                                    subplot_titles=("Wind Speed & Gust (kts)", "Wave & Swell Height (m)"))
+
+                # 상단: 바람 그래프
+                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Wind Speed(kts)'], name="Wind Speed", line=dict(color='firebrick', width=2)), row=1, col1)
+                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Gust(kts)'], name="Gust", line=dict(color='orange', width=1, dash='dot'), fill='tonexty'), row=1, col1)
+
+                # 하단: 파도 그래프
+                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Waves(m)'], name="Waves", line=dict(color='royalblue', width=3)), row=2, col1)
+                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Swell(m)'], name="Swell", line=dict(color='skyblue', width=2, dash='dash')), row=2, col1)
+
+                # 날짜별 구분 배경선(V-Bands) 추가 로직
+                unique_days = df[time_col_name].dt.date.unique()
+                for i, day in enumerate(unique_days):
+                    if i % 2 == 0:  # 이틀 단위로 연한 배경색 추가
+                        fig.add_vrect(x0=str(day), x1=str(day + timedelta(days=1)), 
+                                      fillcolor="gray", opacity=0.1, layer="below", line_width=0)
+
+                # 레이아웃 설정
+                fig.update_layout(height=600, hovermode="x unified", showlegend=True,
+                                  legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+                fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+                
                 st.plotly_chart(fig, use_container_width=True)
         else:
             st.error("데이터 수신 실패")
