@@ -8,25 +8,29 @@ import math
 # 페이지 설정
 st.set_page_config(page_title="Windy Marine Forecast", layout="wide")
 
-# 세션 상태 초기화 (마지막 입력값 및 시차 기억)
+# 세션 상태 초기화
 if 'lat' not in st.session_state: st.session_state.lat = 31.8700
 if 'lon' not in st.session_state: st.session_state.lon = 126.7700
-if 'offset' not in st.session_state: st.session_state.offset = 9 # 기본 한국 시간(UTC+9)
+if 'offset' not in st.session_state: st.session_state.offset = 9
 
 # API 키 및 설정
 API_KEY = st.secrets["WINDY_API_KEY"]
 BASE_URL = "https://api.windy.com/api/point-forecast/v2"
 MS_TO_KNOTS = 1.94384
 
-# 풍향 각도 + 방위 텍스트 결합 함수 (예: 270° W)
+# 풍향 각도 + 방위 + 화살표 결합 함수
 def get_wind_dir_full(deg):
+    # 16방위 텍스트
     directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+    # 8방위 화살표 (바람이 불어오는 방향 기준)
+    arrows = ['↓', '↙', '↙', '←', '←', '↖', '↖', '↑', '↑', '↗', '↗', '→', '→', '↘', '↘', '↓']
+    
     idx = int((deg + 11.25) / 22.5) % 16
-    return f"{int(deg)}° {directions[idx]}"
+    return f"{deg:.1f}° {directions[idx]} {arrows[idx]}"
 
 st.title("⚓ 실시간 해상 기상 관측 시스템")
 
-# 상단: 위치 및 시차 입력
+# 상단 입력부
 with st.container():
     col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
     with col1:
@@ -34,7 +38,6 @@ with st.container():
     with col2:
         st.session_state.lon = st.number_input("경도 (Lon)", value=st.session_state.lon, format="%.4f")
     with col3:
-        # +13부터 -12까지의 시차 선택 콤보박스
         offset_options = list(range(13, -13, -1))
         st.session_state.offset = st.selectbox("시간대 설정 (UTC Offset)", options=offset_options, index=offset_options.index(st.session_state.offset))
     with col4:
@@ -66,21 +69,22 @@ if fetch_btn:
 
             limit = 56 # 7일치
             
-            # 시간 계산 (UTC 기준 t/1000에 사용자가 선택한 시차 적용)
+            # 시간대 적용
             times = [datetime.fromtimestamp(t/1000) + timedelta(hours=(st.session_state.offset - 9)) for t in data_gfs.get('ts', [])[:limit]]
-            # 주의: 시스템 기본이 KST(UTC+9)일 수 있으므로 (offset - 9)로 보정하여 선택한 UTC를 맞춥니다.
 
             df = pd.DataFrame({
                 f"Time (UTC{st.session_state.offset:+} )": times,
-                "Pressure(hPa)": [p/100 for p in data_gfs.get('pressure-surface', [])[:limit]],
+                "Pressure(hPa)": [round(p/100, 1) for p in data_gfs.get('pressure-surface', [])[:limit]],
                 "Wind_U": data_gfs.get('wind_u-surface', [])[:limit],
                 "Wind_V": data_gfs.get('wind_v-surface', [])[:limit],
-                "Gust(kts)": [g * MS_TO_KNOTS for g in sanitize(data_gfs.get('gust-surface', [])[:limit])],
-                "Waves(m)": sanitize(data_wave.get('waves_height-surface', [])[:limit]),
-                "Swell(m)": sanitize(data_wave.get('swell1_height-surface', [])[:limit])
+                "Gust(kts)": [round(g * MS_TO_KNOTS, 1) for g in sanitize(data_gfs.get('gust-surface', [])[:limit])],
+                "Waves(m)": [round(w, 1) for w in sanitize(data_wave.get('waves_height-surface', [])[:limit])],
+                "Swell(m)": [round(s, 1) for s in sanitize(data_wave.get('swell1_height-surface', [])[:limit])]
             })
 
-            df['Wind Speed(kts)'] = ((df['Wind_U']**2 + df['Wind_V']**2)**0.5) * MS_TO_KNOTS
+            # 풍속 계산 및 반올림
+            df['Wind Speed(kts)'] = (((df['Wind_U']**2 + df['Wind_V']**2)**0.5) * MS_TO_KNOTS).round(1)
+            # 풍향 계산
             df['Wind_Deg'] = df.apply(lambda row: (math.degrees(math.atan2(row['Wind_U'], row['Wind_V'])) + 180) % 360, axis=1)
             df['Wind Direction'] = df['Wind_Deg'].apply(get_wind_dir_full)
 
