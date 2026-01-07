@@ -46,6 +46,13 @@ if fetch_btn:
             data_gfs = r_gfs.json()
             data_wave = r_wave.json()
 
+            # --- 디버깅 섹션: 실제 데이터 구조 확인 ---
+            with st.expander("🛠️ API 응답 원본 데이터 확인 (디버깅 전용)"):
+                st.write("GFS 응답 키:", data_gfs.keys())
+                st.write("Wave 응답 키:", data_wave.keys())
+                st.json(data_wave) # Wave 데이터 구조 확인
+            # ------------------------------------------
+
             # 데이터 가공
             df = pd.DataFrame({
                 "Time": [datetime.fromtimestamp(t/1000) for t in data_gfs['ts']],
