@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # 1. 페이지 설정
-st.set_page_config(page_title="Windy Marine Forecast", layout="wide")
+st.set_page_config(page_title="Captain Park's Marine Forecast", layout="wide")
 
 # 2. 세션 상태 및 API 설정
 if 'lat' not in st.session_state: st.session_state.lat = 31.8700
@@ -29,7 +29,7 @@ def get_arrow_html(deg, color="#007BFF"):
     return f'<span style="display:inline-block; transform:rotate({deg}deg); font-size:18px; color:{color}; margin-left:5px;">↑</span>'
 
 # 4. UI 상단
-st.title("⚓ 실시간 해상 기상 관측 시스템")
+st.title("⚓ 해양 기상 예보 시스템")
 
 with st.container():
     col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
