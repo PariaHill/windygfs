@@ -97,31 +97,32 @@ if fetch_btn:
             with tab2:
                 st.subheader("바람 및 파도 상세 분석 (7-Day)")
                 
-                # 2단 그래프 구성 (행 2개, 공유 X축)
+                # 2단 그래프 구성 (row, col 인자 오류 수정)
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                                    vertical_spacing=0.1,
+                                    vertical_spacing=0.12,
                                     subplot_titles=("Wind Speed & Gust (kts)", "Wave & Swell Height (m)"))
 
-                # 상단: 바람 그래프
-                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Wind Speed(kts)'], name="Wind Speed", line=dict(color='firebrick', width=2)), row=1, col1)
-                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Gust(kts)'], name="Gust", line=dict(color='orange', width=1, dash='dot'), fill='tonexty'), row=1, col1)
+                # 상단: 바람 그래프 (row=1, col=1 명시)
+                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Wind Speed(kts)'], name="Wind Speed", line=dict(color='firebrick', width=2)), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Gust(kts)'], name="Gust", line=dict(color='orange', width=1, dash='dot'), fill='tonexty'), row=1, col=1)
 
-                # 하단: 파도 그래프
-                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Waves(m)'], name="Waves", line=dict(color='royalblue', width=3)), row=2, col1)
-                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Swell(m)'], name="Swell", line=dict(color='skyblue', width=2, dash='dash')), row=2, col1)
+                # 하단: 파도 그래프 (row=2, col=1 명시)
+                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Waves(m)'], name="Waves", line=dict(color='royalblue', width=3)), row=2, col=1)
+                fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Swell(m)'], name="Swell", line=dict(color='skyblue', width=2, dash='dash')), row=2, col=1)
 
-                # 날짜별 구분 배경선(V-Bands) 추가 로직
+                # 날짜별 구분 배경선 (V-Bands)
                 unique_days = df[time_col_name].dt.date.unique()
                 for i, day in enumerate(unique_days):
-                    if i % 2 == 0:  # 이틀 단위로 연한 배경색 추가
+                    if i % 2 == 0:
                         fig.add_vrect(x0=str(day), x1=str(day + timedelta(days=1)), 
                                       fillcolor="gray", opacity=0.1, layer="below", line_width=0)
 
                 # 레이아웃 설정
-                fig.update_layout(height=600, hovermode="x unified", showlegend=True,
+                fig.update_layout(height=700, hovermode="x unified", showlegend=True,
                                   legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
-                fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+                
+                # X축 날짜 포맷 최적화
+                fig.update_xaxes(tickformat="%m-%d\n%H:%M", showgrid=True, gridwidth=1, gridcolor='LightGray')
                 
                 st.plotly_chart(fig, use_container_width=True)
         else:
