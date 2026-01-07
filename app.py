@@ -46,41 +46,36 @@ if fetch_btn:
             data_gfs = r_gfs.json()
             data_wave = r_wave.json()
 
-            # --- 디버깅 섹션: 실제 데이터 구조 확인 ---
-            with st.expander("🛠️ API 응답 원본 데이터 확인 (디버깅 전용)"):
-                st.write("GFS 응답 키:", data_gfs.keys())
-                st.write("Wave 응답 키:", data_wave.keys())
-                st.json(data_wave) # Wave 데이터 구조 확인
-            # ------------------------------------------
+            # 데이터 가공 (실제 확인된 키 값으로 수정)
+            # NULL(None) 값은 0.0으로 치환하여 오류 방지
+            def sanitize(data_list):
+                return [x if x is not None else 0.0 for x in data_list]
 
-            # 데이터 가공
             df = pd.DataFrame({
-                "Time": [datetime.fromtimestamp(t/1000) for t in data_gfs['ts']],
-                "Pressure(hPa)": [p/100 for p in data_gfs['pressure-surface']],
-                "Wind_U": data_gfs['wind_u-surface'],
-                "Wind_V": data_gfs['wind_v-surface'],
-                "Gust(m/s)": data_gfs['gust-surface'],
-                "Waves(m)": data_wave['waves-surface'],
-                "Swell(m)": data_wave['swell1-surface']
+                "Time": [datetime.fromtimestamp(t/1000) for t in data_gfs.get('ts', [])],
+                "Pressure(hPa)": [p/100 for p in data_gfs.get('pressure-surface', [])],
+                "Wind_U": data_gfs.get('wind_u-surface', []),
+                "Wind_V": data_gfs.get('wind_v-surface', []),
+                "Gust(m/s)": data_gfs.get('gust-surface', []),
+                "Waves(m)": sanitize(data_wave.get('waves_height-surface', [])),
+                "Swell(m)": sanitize(data_wave.get('swell1_height-surface', []))
             })
             
-            # 풍속/풍향 계산 (기상학적 변환)
+            # 풍속 계산
             df['Wind Speed(m/s)'] = (df['Wind_U']**2 + df['Wind_V']**2)**0.5
             
-            # 탭 인터페이스 구성
+            # 탭 인터페이스
             tab1, tab2 = st.tabs(["📊 데이터 테이블", "📈 시각화 그래프"])
 
             with tab1:
-                st.subheader("시간대별 상세 예보 데이터")
+                st.subheader("시간대별 상세 예보 (가공 데이터)")
                 st.dataframe(df.drop(columns=['Wind_U', 'Wind_V']), use_container_width=True)
 
             with tab2:
-                st.subheader("주요 기상 요소 변화")
-                # 파고 및 풍속 복합 그래프
+                st.subheader("해상 상태 변화 (파고 및 풍속)")
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(x=df['Time'], y=df['Waves(m)'], name="파고 (m)", line=dict(color='royalblue', width=3)))
+                fig.add_trace(go.Scatter(x=df['Time'], y=df['Waves(m)'], name="파고 (m)", line=dict(color='royalblue')))
                 fig.add_trace(go.Scatter(x=df['Time'], y=df['Wind Speed(m/s)'], name="풍속 (m/s)", line=dict(color='firebrick', dash='dot')))
-                fig.update_layout(hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 st.plotly_chart(fig, use_container_width=True)
                 
         else:
