@@ -17,9 +17,9 @@ st.title("⚓ 실시간 해상 기상 관측 데이터")
 with st.container():
     col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
-        lat = st.number_input("위도 (Latitude)", value=49.809, format="%.4f")
+        lat = st.number_input("위도 (Latitude)", value=31.87, format="%.4f")
     with col2:
-        lon = st.number_input("경도 (Longitude)", value=16.787, format="%.4f")
+        lon = st.number_input("경도 (Longitude)", value=126.77, format="%.4f")
     with col3:
         st.write(" ") # 수직 정렬용
         fetch_btn = st.button("데이터 수신 시작", use_container_width=True)
