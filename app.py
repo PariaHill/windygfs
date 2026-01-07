@@ -26,6 +26,7 @@ def get_wind_direction_text(deg):
     return directions[idx]
 
 def get_wind_arrow_html(deg):
+    """불어오는 쪽 기준 정밀 화살표 (N:0도 -> ↑)"""
     rotate_deg = deg 
     return f'<span style="display:inline-block; transform:rotate({rotate_deg}deg); font-size:18px; color:#007BFF; margin-left:5px;">↑</span>'
 
@@ -97,16 +98,29 @@ if fetch_btn:
             with tab2:
                 st.subheader("바람 및 파도 상세 분석 (7-Day)")
                 
-                # 2단 그래프 구성 (row, col 인자 오류 수정)
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                                    vertical_spacing=0.12,
+                                    vertical_spacing=0.15,
                                     subplot_titles=("Wind Speed & Gust (kts)", "Wave & Swell Height (m)"))
 
-                # 상단: 바람 그래프 (row=1, col=1 명시)
+                # 상단: 바람 그래프
                 fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Wind Speed(kts)'], name="Wind Speed", line=dict(color='firebrick', width=2)), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Gust(kts)'], name="Gust", line=dict(color='orange', width=1, dash='dot'), fill='tonexty'), row=1, col=1)
 
-                # 하단: 파도 그래프 (row=2, col=1 명시)
+                # 상단 그래프에 정밀 화살표 추가 (가독성을 위해 6시간 간격으로 표시)
+                for i in range(0, len(df), 2):  # 3시간 간격 데이터이므로 2개마다=6시간
+                    fig.add_annotation(
+                        dict(
+                            x=df[time_col_name].iloc[i],
+                            y=df['Wind Speed(kts)'].max() * 1.15, # 그래프 상단 여백에 배치
+                            text="↑", # 기본 화살표
+                            showarrow=False,
+                            font=dict(size=16, color="#007BFF"),
+                            textangle=df['Wind_Deg'].iloc[i], # 1도 단위 정밀 회전
+                            xref="x", yref="y1"
+                        )
+                    )
+
+                # 하단: 파도 그래프
                 fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Waves(m)'], name="Waves", line=dict(color='royalblue', width=3)), row=2, col=1)
                 fig.add_trace(go.Scatter(x=df[time_col_name], y=df['Swell(m)'], name="Swell", line=dict(color='skyblue', width=2, dash='dash')), row=2, col=1)
 
@@ -115,14 +129,21 @@ if fetch_btn:
                 for i, day in enumerate(unique_days):
                     if i % 2 == 0:
                         fig.add_vrect(x0=str(day), x1=str(day + timedelta(days=1)), 
-                                      fillcolor="gray", opacity=0.1, layer="below", line_width=0)
+                                      fillcolor="gray", opacity=0.07, layer="below", line_width=0)
 
                 # 레이아웃 설정
-                fig.update_layout(height=700, hovermode="x unified", showlegend=True,
-                                  legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                fig.update_layout(height=800, hovermode="x unified", showlegend=True,
+                                  legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1))
                 
-                # X축 날짜 포맷 최적화
-                fig.update_xaxes(tickformat="%m-%d\n%H:%M", showgrid=True, gridwidth=1, gridcolor='LightGray')
+                # X축 설정: 날짜와 시간 표시 최적화
+                fig.update_xaxes(
+                    tickformat="%d일\n%H:%M", 
+                    dtick=21600000, # 6시간 간격으로 그리드 표시 (ms 단위)
+                    showgrid=True, gridwidth=1, gridcolor='rgba(200,200,200,0.5)'
+                )
+                
+                # Y축 범위 조정 (화살표 공간 확보)
+                fig.update_yaxes(range=[0, df['Wind Speed(kts)'].max() * 1.3], row=1, col=1)
                 
                 st.plotly_chart(fig, use_container_width=True)
         else:
