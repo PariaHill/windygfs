@@ -25,8 +25,9 @@ def get_direction_text(deg):
     return directions[idx]
 
 def get_arrow_html(deg, color="#007BFF"):
-    """정밀 회전 화살표 HTML 생성 (불어오는/밀려오는 방향 기준)"""
-    return f'<span style="display:inline-block; transform:rotate({deg}deg); font-size:18px; color:{color}; margin-left:5px;">↑</span>'
+    """불어오는 쪽을 가리키도록 180도 반전 (deg + 180)"""
+    rotate_deg = (deg + 180) % 360 
+    return f'<span style="display:inline-block; transform:rotate({rotate_deg}deg); font-size:18px; color:{color}; margin-left:5px;">↑</span>'
 
 # 4. UI 상단
 st.title("⚓ 해양 기상 예보 시스템")
@@ -93,15 +94,29 @@ if fetch_btn:
                 fig.add_trace(go.Scatter(x=df[time_col], y=df['Wind Speed(kts)'], name="Wind", line=dict(color='firebrick')), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df[time_col], y=df['Gust(kts)'], name="Gust", line=dict(color='orange', dash='dot'), fill='tonexty'), row=1, col=1)
                 for i in range(len(df)):
-                    fig.add_annotation(dict(x=df[time_col].iloc[i], y=df['Wind Speed(kts)'].max() * 1.2, text="↑", showarrow=False, 
-                                            font=dict(size=14, color="#007BFF"), textangle=df['Wind_Deg'].iloc[i], xref="x1", yref="y1"))
+                    fig.add_annotation(dict(
+                        x=df[time_col].iloc[i], 
+                        y=df['Wind Speed(kts)'].max() * 1.2, 
+                        text="↑", 
+                        showarrow=False, 
+                        font=dict(size=14, color="#007BFF"), 
+                        textangle=df['Wind_Deg'].iloc[i] + 180, # 180도 더해서 반전
+                        xref="x1", yref="y1"
+                    ))
 
                 # 하단: 파도 그래프 + 화살표 (초록색)
                 fig.add_trace(go.Scatter(x=df[time_col], y=df['Waves(m)'], name="Waves", line=dict(color='royalblue', width=3)), row=2, col=1)
                 fig.add_trace(go.Scatter(x=df[time_col], y=df['Swell(m)'], name="Swell", line=dict(color='skyblue', dash='dash')), row=2, col=1)
                 for i in range(len(df)):
-                    fig.add_annotation(dict(x=df[time_col].iloc[i], y=df['Waves(m)'].max() * 1.25, text="↑", showarrow=False, 
-                                            font=dict(size=14, color="#28A745"), textangle=df['Wave_Deg'].iloc[i], xref="x2", yref="y2"))
+                    fig.add_annotation(dict(
+                        x=df[time_col].iloc[i], 
+                        y=df['Waves(m)'].max() * 1.25, 
+                        text="↑", 
+                        showarrow=False, 
+                        font=dict(size=14, color="#28A745"), 
+                        textangle=df['Wave_Deg'].iloc[i] + 180, # 180도 더해서 반전
+                        xref="x2", yref="y2"
+                    ))
 
                 # 날짜 구분 및 X축 설정
                 for i, day in enumerate(df[time_col].dt.date.unique()):
