@@ -21,66 +21,184 @@ st.markdown("""
     <style>
     /* 인쇄 전용 헤더 - 화면에서는 숨김 */
     .print-header {
-        display: none;
+        display: none !important;
     }
     
     @media print {
-        /* 화면 전용 요소 숨김 */
-        section[data-testid="stSidebar"], 
-        .stButton, .stSelectbox, .stNumberInput,
-        header, [data-testid="stHeader"],
+        /* ========================================
+           모든 화면 전용 요소 완전히 숨김
+           ======================================== */
+        
+        /* Streamlit 시스템 요소 */
+        section[data-testid="stSidebar"],
+        header[data-testid="stHeader"],
+        [data-testid="stHeader"],
+        footer,
+        [data-testid="stFooter"],
+        .stDeployButton,
+        #MainMenu,
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"],
+        [data-testid="stStatusWidget"],
+        
+        /* 입력/버튼 요소 */
+        .stButton,
+        .stSelectbox, 
+        .stNumberInput,
+        [data-testid="stNumberInput"],
+        [data-testid="stSelectbox"],
+        button,
+        [data-baseweb="select"],
+        [data-baseweb="input"],
+        
+        /* 탭 네비게이션 */
         .stTabs [role="tablist"],
-        footer, [data-testid="stFooter"],
-        .no-print,
+        [data-baseweb="tab-list"],
+        [role="tablist"],
+        
+        /* 알림/상태 메시지 */
         [data-testid="stAlert"],
-        [data-testid="stSpinner"] { 
-            display: none !important; 
+        .stAlert,
+        [data-testid="stSpinner"],
+        .stSpinner,
+        [data-testid="stToast"],
+        
+        /* 커스텀 no-print */
+        .no-print,
+        .no-print *,
+        
+        /* 상단 타이틀 영역 완전 제거 */
+        .main > div > div:first-child,
+        [data-testid="stAppViewContainer"] > div:first-child > div:first-child,
+        .stApp > header,
+        
+        /* 서브헤더 "데이터 테이블 리포트" 등 */
+        h2[data-testid="stSubheader"],
+        .stSubheader
+        {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            width: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            position: absolute !important;
+            left: -9999px !important;
         }
         
-        /* 인쇄 전용 헤더 표시 */
+        /* ========================================
+           인쇄 전용 헤더 표시
+           ======================================== */
         .print-header {
             display: block !important;
+            visibility: visible !important;
+            position: relative !important;
+            left: 0 !important;
+            width: 100% !important;
             text-align: center;
-            margin-bottom: 20px;
-            padding: 10px;
-            border-bottom: 2px solid #333;
+            margin: 0 0 10px 0 !important;
+            padding: 8px 0 !important;
+            border-bottom: 1.5px solid #333;
+            page-break-after: avoid;
+            background: white !important;
         }
         .print-header h2 {
-            margin: 0 0 5px 0;
-            font-size: 18px;
+            margin: 0 0 5px 0 !important;
+            padding: 0 !important;
+            font-size: 14pt !important;
+            font-weight: bold !important;
+            color: #000 !important;
         }
         .print-header p {
-            margin: 3px 0;
-            font-size: 12px;
-            color: #555;
+            margin: 2px 0 !important;
+            padding: 0 !important;
+            font-size: 9pt !important;
+            color: #333 !important;
         }
         
-        /* 페이지 설정 */
-        .main .block-container { 
-            padding-top: 0 !important; 
+        /* ========================================
+           페이지 설정 - 세로, 여백 최소
+           ======================================== */
+        @page {
+            size: A4 portrait;
+            margin: 8mm 8mm 8mm 8mm;
+        }
+        
+        /* 본문 컨테이너 */
+        html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        
+        .main, 
+        .main .block-container,
+        [data-testid="stAppViewContainer"],
+        .stApp {
+            padding: 0 !important;
+            margin: 0 !important;
             max-width: 100% !important;
+            width: 100% !important;
         }
         
-        /* 테이블 스타일 */
+        /* ========================================
+           테이블 스타일
+           ======================================== */
         table { 
-            font-size: 9px !important; 
+            font-size: 7pt !important; 
             width: 100% !important; 
             border-collapse: collapse !important;
+            page-break-inside: auto !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+        table th {
+            background-color: #f0f0f0 !important;
+            font-weight: bold !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
         }
         table th, table td {
-            padding: 4px 2px !important;
-            border: 1px solid #ddd !important;
+            padding: 2px 3px !important;
+            border: 0.5pt solid #999 !important;
+            text-align: center !important;
+        }
+        tr {
+            page-break-inside: avoid !important;
         }
         
-        /* 그래프 스타일 */
-        .js-plotly-plot { 
-            height: 700px !important; 
+        /* ========================================
+           Plotly 그래프 - SVG 렌더링 강제
+           ======================================== */
+        [data-testid="stPlotlyChart"],
+        .stPlotlyChart,
+        .js-plotly-plot,
+        .plot-container,
+        .plotly {
+            display: block !important;
+            visibility: visible !important;
+            width: 100% !important;
+            min-height: 300px !important;
+            max-height: 400px !important;
+            page-break-inside: avoid !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
         }
         
-        /* 페이지 여백 */
-        @page {
-            margin: 10mm;
-            size: A4 landscape;
+        /* SVG 요소 강제 표시 */
+        .js-plotly-plot .plotly .main-svg,
+        .js-plotly-plot svg,
+        svg {
+            display: block !important;
+            visibility: visible !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+        
+        /* Canvas fallback (WebGL) 숨기고 SVG 사용 */
+        .js-plotly-plot .gl-container {
+            display: none !important;
         }
     }
     </style>
@@ -616,8 +734,14 @@ if fetch_btn or 'data_loaded' in st.session_state:
                 
                 st.subheader("데이터 테이블 리포트", anchor=False)
                 st.markdown('<div class="no-print">', unsafe_allow_html=True)
-                if st.button("🖨️ 테이블 인쇄 / PDF 저장", key="p_t1"): 
-                    st.components.v1.html("<script>window.parent.print();</script>", height=0)
+                
+                col_btn1, col_btn2 = st.columns([1, 2])
+                with col_btn1:
+                    if st.button("🖨️ 테이블 인쇄", key="p_t1"): 
+                        st.components.v1.html("<script>window.parent.print();</script>", height=0)
+                with col_btn2:
+                    st.caption("💡 인쇄 시 '머리글/바닥글' 체크 해제 권장")
+                
                 st.markdown('</div>', unsafe_allow_html=True)
                 
                 display_cols = [
@@ -645,8 +769,24 @@ if fetch_btn or 'data_loaded' in st.session_state:
                 
                 st.subheader("그래프 분석 리포트", anchor=False)
                 st.markdown('<div class="no-print">', unsafe_allow_html=True)
-                if st.button("🖨️ 그래프 인쇄 / PDF 저장", key="p_t2"): 
+                
+                col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
+                with col_btn1:
+                    print_graph = st.button("🖨️ 그래프 인쇄", key="p_t2")
+                with col_btn2:
+                    use_static = st.checkbox("인쇄용 이미지", value=False, help="체크하면 인쇄 가능한 정적 이미지로 변환")
+                with col_btn3:
+                    st.caption("💡 인쇄 시 '머리글/바닥글' 체크 해제 권장")
+                
+                if print_graph:
+                    st.markdown("""
+                    <div class="print-tip">
+                    💡 <strong>인쇄 팁:</strong> 그래프가 안 나오면 <strong>"인쇄용 이미지"</strong>를 체크하세요!<br>
+                    인쇄 대화상자에서 <strong>"머리글 및 바닥글"</strong>을 <strong>해제</strong>하면 페이지 번호, URL이 제거됩니다.
+                    </div>
+                    """, unsafe_allow_html=True)
                     st.components.v1.html("<script>window.parent.print();</script>", height=0)
+                
                 st.markdown('</div>', unsafe_allow_html=True)
                 
                 fig = make_subplots(
@@ -733,9 +873,12 @@ if fetch_btn or 'data_loaded' in st.session_state:
                         )
                 
                 fig.update_layout(
-                    height=800, 
+                    height=700, 
                     hovermode="x unified", 
-                    legend=dict(orientation="h", y=1.05)
+                    legend=dict(orientation="h", y=1.05),
+                    # 인쇄 최적화
+                    paper_bgcolor='white',
+                    plot_bgcolor='white',
                 )
                 fig.update_xaxes(tickformat="%d일\n%H:%M", dtick=21600000, showgrid=True, row=1, col=1)
                 fig.update_xaxes(tickformat="%d일\n%H:%M", dtick=21600000, showgrid=True, row=2, col=1)
@@ -751,4 +894,25 @@ if fetch_btn or 'data_loaded' in st.session_state:
                     if pd.notna(wave_max) and wave_max > 0:
                         fig.update_yaxes(range=[0, wave_max * 1.4], row=2, col=1)
                 
-                st.plotly_chart(fig, use_container_width=True)
+                # SVG 렌더링 강제 (인쇄 호환성)
+                config = {
+                    'staticPlot': False,
+                    'toImageButtonOptions': {
+                        'format': 'svg',
+                        'filename': 'marine_forecast'
+                    },
+                    'displayModeBar': True,
+                    'responsive': True
+                }
+                
+                # 인쇄용 정적 이미지 모드
+                if use_static:
+                    try:
+                        # Plotly 그래프를 PNG 이미지로 변환
+                        img_bytes = fig.to_image(format="png", width=1200, height=900, scale=2)
+                        st.image(img_bytes, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"이미지 변환 실패: {e}. 기본 그래프로 표시합니다.")
+                        st.plotly_chart(fig, use_container_width=True, config=config)
+                else:
+                    st.plotly_chart(fig, use_container_width=True, config=config)
