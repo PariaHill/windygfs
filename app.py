@@ -16,20 +16,6 @@ from plotly.subplots import make_subplots
 # ============================================================
 st.set_page_config(page_title="Captain Park's Marine Forecast", layout="wide")
 
-# 인쇄 최적화 CSS
-st.markdown("""
-    <style>
-    @media print {
-        section[data-testid="stSidebar"], .stButton, .stSelectbox, .stNumberInput, 
-        header, [data-testid="stHeader"], .stTabs [role="tablist"],
-        footer, [data-testid="stFooter"] { display: none !important; }
-        .main .block-container { padding-top: 1rem !important; }
-        table { font-size: 10px !important; width: 100% !important; }
-        .js-plotly-plot { height: 750px !important; }
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 # ============================================================
 # 2. 세션 상태 초기화
 # ============================================================
