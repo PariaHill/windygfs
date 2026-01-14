@@ -215,35 +215,55 @@ def parse_grib_data(grib_bytes, lat, lon):
                     continue
                 
                 # 변수 추출 - cfgrib 변수명 매핑
+                # cfgrib은 GRIB2 shortName을 소문자로 변환하여 사용
                 var_mapping = {
                     # Atmosphere
                     'prmsl': 'pressure',      # Pa -> hPa 변환 필요
                     'gust': 'gust',           # m/s
                     # Wave model - wind
                     'wind': 'wind_speed',     # m/s (직접 풍속)
+                    'ws': 'wind_speed',       # alternative (wind speed)
                     'wdir': 'wind_dir',       # degrees (직접 풍향)
                     'u': 'wind_u',            # m/s
                     'v': 'wind_v',            # m/s
                     'u10': 'wind_u',          # m/s (10m)
                     'v10': 'wind_v',          # m/s (10m)
-                    # Wave model - waves
-                    'htsgw': 'wave_height',   # m
-                    'shww': 'wave_height',    # alternative name
-                    'dirpw': 'wave_dir',      # degrees
-                    'mdww': 'wave_dir',       # alternative name  
-                    'perpw': 'wave_period',   # seconds
-                    'mpww': 'wave_period',    # alternative name
+                    '10u': 'wind_u',          # ECMWF style
+                    '10v': 'wind_v',          # ECMWF style
+                    # Wave model - combined waves (HTSGW)
+                    'htsgw': 'wave_height',   # m - primary name
+                    'swh': 'wave_height',     # m - significant wave height (ECMWF style)
+                    'hs': 'wave_height',      # m - Hs notation
+                    'hmax': 'wave_height',    # m - max wave height
+                    'shww': 'wave_height',    # m - significant height wind waves
+                    'wvhgt': 'wave_height',   # m - WVHGT variable
+                    # Wave model - direction (DIRPW)
+                    'dirpw': 'wave_dir',      # degrees - primary wave direction
+                    'mwd': 'wave_dir',        # mean wave direction (ECMWF)
+                    'mdww': 'wave_dir',       # mean direction wind waves
+                    'wvdir': 'wave_dir',      # WVDIR variable
+                    # Wave model - period (PERPW)  
+                    'perpw': 'wave_period',   # seconds - primary wave period
+                    'mwp': 'wave_period',     # mean wave period (ECMWF)
+                    'mpww': 'wave_period',    # mean period wind waves
+                    'wvper': 'wave_period',   # WVPER variable
                     # Wave model - swell (1 in sequence)
                     'swell': 'swell_height',  # m
-                    'shts': 'swell_height',   # alternative name
+                    'shts': 'swell_height',   # significant height total swell
                     'swdir': 'swell_dir',     # degrees
-                    'mdts': 'swell_dir',      # alternative name
+                    'mdts': 'swell_dir',      # mean direction total swell
                     'swper': 'swell_period',  # seconds
-                    'mpts': 'swell_period',   # alternative name
+                    'mpts': 'swell_period',   # mean period total swell
                 }
                 
                 for var in ds.data_vars:
                     var_lower = var.lower()
+                    # 디버깅: 매핑되지 않은 변수 기록
+                    if var_lower not in var_mapping:
+                        if 'unknown_vars' not in result:
+                            result['unknown_vars'] = []
+                        result['unknown_vars'].append(var)
+                    
                     if var_lower in var_mapping:
                         mapped_key = var_mapping[var_lower]
                         # 이미 값이 있으면 스킵 (첫 번째 값 유지)
@@ -384,6 +404,12 @@ if fetch_btn or 'data_loaded' in st.session_state:
         else:
             st.session_state.data_loaded = True
             st.info(f"📊 {successful}개 시간대 데이터 수신 완료")
+            
+            # 디버깅: 인식되지 않은 변수 출력
+            if all_data and 'unknown_vars' in all_data[0]:
+                unknown = list(set(all_data[0].get('unknown_vars', [])))
+                if unknown:
+                    st.warning(f"🔍 미매핑 변수 발견: {unknown}")
             
             # DataFrame 생성
             df = pd.DataFrame(all_data)
