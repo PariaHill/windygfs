@@ -16,6 +16,76 @@ from plotly.subplots import make_subplots
 # ============================================================
 st.set_page_config(page_title="Captain Park's Marine Forecast", layout="wide")
 
+# 인쇄 최적화 CSS
+st.markdown("""
+    <style>
+    /* 인쇄 전용 헤더 - 화면에서는 숨김 */
+    .print-header {
+        display: none;
+    }
+    
+    @media print {
+        /* 화면 전용 요소 숨김 */
+        section[data-testid="stSidebar"], 
+        .stButton, .stSelectbox, .stNumberInput,
+        header, [data-testid="stHeader"],
+        .stTabs [role="tablist"],
+        footer, [data-testid="stFooter"],
+        .no-print,
+        [data-testid="stAlert"],
+        [data-testid="stSpinner"] { 
+            display: none !important; 
+        }
+        
+        /* 인쇄 전용 헤더 표시 */
+        .print-header {
+            display: block !important;
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            border-bottom: 2px solid #333;
+        }
+        .print-header h2 {
+            margin: 0 0 5px 0;
+            font-size: 18px;
+        }
+        .print-header p {
+            margin: 3px 0;
+            font-size: 12px;
+            color: #555;
+        }
+        
+        /* 페이지 설정 */
+        .main .block-container { 
+            padding-top: 0 !important; 
+            max-width: 100% !important;
+        }
+        
+        /* 테이블 스타일 */
+        table { 
+            font-size: 9px !important; 
+            width: 100% !important; 
+            border-collapse: collapse !important;
+        }
+        table th, table td {
+            padding: 4px 2px !important;
+            border: 1px solid #ddd !important;
+        }
+        
+        /* 그래프 스타일 */
+        .js-plotly-plot { 
+            height: 700px !important; 
+        }
+        
+        /* 페이지 여백 */
+        @page {
+            margin: 10mm;
+            size: A4 landscape;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 # ============================================================
 # 2. 세션 상태 초기화
 # ============================================================
@@ -39,6 +109,32 @@ def get_arrow_html(deg, color="#007BFF"):
     """불어오는 쪽을 가리키도록 180도 반전"""
     rotate_deg = (deg + 180) % 360 
     return f'<span style="display:inline-block; transform:rotate({rotate_deg}deg); font-size:16px; color:{color}; margin-left:5px;">↑</span>'
+
+def format_coordinate(decimal_deg, is_lat=True):
+    """
+    십진수 좌표를 도분 형식으로 변환
+    예: 31.8700 -> "31° 52.20' N" 또는 126.7700 -> "126° 46.20' E"
+    """
+    direction = ""
+    if is_lat:
+        direction = "N" if decimal_deg >= 0 else "S"
+    else:
+        direction = "E" if decimal_deg >= 0 else "W"
+    
+    decimal_deg = abs(decimal_deg)
+    degrees = int(decimal_deg)
+    minutes = (decimal_deg - degrees) * 60
+    
+    return f"{degrees:02d}° {minutes:05.2f}' {direction}"
+
+def format_position_short(lat, lon):
+    """
+    짧은 형식 위치 문자열
+    예: "31° 52.20' N  126° 46.20' E"
+    """
+    lat_str = format_coordinate(lat, is_lat=True)
+    lon_str = format_coordinate(lon, is_lat=False)
+    return f"{lat_str}  {lon_str}"
 
 def get_available_cycle():
     """
@@ -342,6 +438,7 @@ def fetch_all_forecasts_parallel(date_str, cycle, cycle_time, lat, lon, progress
 # ============================================================
 # 4. UI 상단
 # ============================================================
+st.markdown('<div class="no-print">', unsafe_allow_html=True)
 st.title("⚓ 실시간 해상 기상 관측 시스템")
 st.caption("Data Source: NOAA GFS & GFS-Wave (0.25° Resolution)")
 
@@ -359,6 +456,7 @@ with st.container():
     with col4:
         st.write(" ")
         fetch_btn = st.button("데이터 수신 시작", use_container_width=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================
 # 5. 데이터 수집 및 표시
@@ -371,7 +469,10 @@ if fetch_btn or 'data_loaded' in st.session_state:
     if date_str is None:
         st.error("❌ 사용 가능한 GFS 데이터를 찾을 수 없습니다. 잠시 후 다시 시도해주세요.")
     else:
+        # 상태 메시지들 (인쇄 시 숨김)
+        st.markdown('<div class="no-print">', unsafe_allow_html=True)
         st.success(f"✅ GFS Cycle: {date_str} {cycle:02d}Z (UTC)")
+        st.markdown('</div>', unsafe_allow_html=True)
         
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -389,6 +490,9 @@ if fetch_btn or 'data_loaded' in st.session_state:
             st.error("❌ 데이터를 가져오지 못했습니다.")
         else:
             st.session_state.data_loaded = True
+            
+            # 상태 메시지 (인쇄 시 숨김)
+            st.markdown('<div class="no-print">', unsafe_allow_html=True)
             st.info(f"📊 {successful}개 시간대 데이터 수신 완료")
             
             # 디버깅: 인식되지 않은 변수 출력
@@ -396,6 +500,7 @@ if fetch_btn or 'data_loaded' in st.session_state:
                 unknown = list(set(all_data[0].get('unknown_vars', [])))
                 if unknown:
                     st.warning(f"🔍 미매핑 변수 발견: {unknown}")
+            st.markdown('</div>', unsafe_allow_html=True)
             
             # DataFrame 생성
             df = pd.DataFrame(all_data)
@@ -492,12 +597,28 @@ if fetch_btn or 'data_loaded' in st.session_state:
             # ============================================================
             # 탭 표시
             # ============================================================
+            
+            # 인쇄용 헤더 정보 준비
+            position_str = format_position_short(st.session_state.lat, st.session_state.lon)
+            cycle_info = f"GFS Cycle: {date_str} {cycle:02d}Z (UTC)"
+            
             tab1, tab2 = st.tabs(["📊 데이터 테이블", "📈 시각화 그래프"])
             
             with tab1:
-                st.subheader("데이터 테이블 리포트")
+                # 인쇄 전용 헤더 (화면에서는 CSS로 숨김)
+                st.markdown(f"""
+                <div class="print-header">
+                    <h2>⚓ Marine Weather Forecast - Data Table</h2>
+                    <p><strong>Position:</strong> {position_str}</p>
+                    <p><strong>Data Source:</strong> NOAA GFS & GFS-Wave (0.25° Resolution) | {cycle_info}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.subheader("데이터 테이블 리포트", anchor=False)
+                st.markdown('<div class="no-print">', unsafe_allow_html=True)
                 if st.button("🖨️ 테이블 인쇄 / PDF 저장", key="p_t1"): 
                     st.components.v1.html("<script>window.parent.print();</script>", height=0)
+                st.markdown('</div>', unsafe_allow_html=True)
                 
                 display_cols = [
                     time_col, "Pressure(hPa)", 
@@ -513,9 +634,20 @@ if fetch_btn or 'data_loaded' in st.session_state:
                         unsafe_allow_html=True)
             
             with tab2:
-                st.subheader("그래프 분석 리포트")
+                # 인쇄 전용 헤더 (화면에서는 CSS로 숨김)
+                st.markdown(f"""
+                <div class="print-header">
+                    <h2>⚓ Marine Weather Forecast - Graph Analysis</h2>
+                    <p><strong>Position:</strong> {position_str}</p>
+                    <p><strong>Data Source:</strong> NOAA GFS & GFS-Wave (0.25° Resolution) | {cycle_info}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.subheader("그래프 분석 리포트", anchor=False)
+                st.markdown('<div class="no-print">', unsafe_allow_html=True)
                 if st.button("🖨️ 그래프 인쇄 / PDF 저장", key="p_t2"): 
                     st.components.v1.html("<script>window.parent.print();</script>", height=0)
+                st.markdown('</div>', unsafe_allow_html=True)
                 
                 fig = make_subplots(
                     rows=2, cols=1, 
