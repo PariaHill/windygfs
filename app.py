@@ -7,7 +7,7 @@ import xarray as xr
 import tempfile
 import os
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -69,7 +69,7 @@ def get_available_cycle():
         
         for cycle in cycles:
             # 해당 cycle이 현재 시간보다 미래면 스킵
-            cycle_time = check_date.replace(hour=cycle, minute=0, second=0, microsecond=0)
+            cycle_time = check_date.replace(hour=cycle, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
             if cycle_time > now_utc:
                 continue
             
@@ -107,12 +107,10 @@ def build_subregion_params(lat, lon, margin=0.25):
 def get_forecast_hours():
     """
     예보 시간 목록 반환
-    0-120시간: 3시간 간격
-    120-168시간: 일부 모델에서 12시간 간격일 수 있음
+    GFS-Wave: 0-120시간 1시간 간격, 120-384시간 3시간 간격
+    여기서는 3시간 간격으로 통일 (0, 3, 6, ... 168)
     """
-    hours = list(range(0, 121, 3))  # 0, 3, 6, ... 120
-    # 120시간 이후는 존재하는지 확인 필요, 일단 3시간 간격으로 시도
-    hours.extend(range(123, 169, 3))  # 123, 126, ... 168
+    hours = list(range(0, 169, 3))  # 0, 3, 6, ... 168 (57개)
     return hours
 
 def fetch_gfs_atmosphere(date_str, cycle, fhour, lat, lon):
@@ -131,24 +129,25 @@ def fetch_gfs_atmosphere(date_str, cycle, fhour, lat, lon):
         resp = requests.get(url, timeout=30)
         if resp.status_code == 200 and len(resp.content) > 100:
             return resp.content
-    except Exception as e:
+    except:
         pass
     return None
 
 def fetch_gfswave(date_str, cycle, fhour, lat, lon):
     """
     GFS Wave 모델에서 바람 및 파도 데이터 가져오기
-    - surface: UGRD, VGRD, HTSGW, DIRPW, PERPW
-    - 1 in sequence: SWELL, SWDIR
+    변수: WIND, WDIR, UGRD, VGRD, HTSGW, DIRPW, PERPW (surface)
+         SWELL, SWDIR, SWPER (1 in sequence)
     """
     subregion = build_subregion_params(lat, lon)
     
-    # URL 인코딩 주의: 공백은 %20 또는 +
+    # grib filter에서 1 in sequence는 "lev_1_in_sequence=on"으로 지정
     url = (f"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfswave.pl?"
            f"dir=%2Fgfs.{date_str}%2F{cycle:02d}%2Fwave%2Fgridded&"
            f"file=gfswave.t{cycle:02d}z.global.0p25.f{fhour:03d}.grib2&"
-           f"var_UGRD=on&var_VGRD=on&var_HTSGW=on&var_DIRPW=on&var_PERPW=on&"
-           f"var_SWELL=on&var_SWDIR=on&"
+           f"var_WIND=on&var_WDIR=on&var_UGRD=on&var_VGRD=on&"
+           f"var_HTSGW=on&var_DIRPW=on&var_PERPW=on&"
+           f"var_SWELL=on&var_SWDIR=on&var_SWPER=on&"
            f"lev_surface=on&lev_1_in_sequence=on&"
            f"{subregion}")
     
@@ -156,13 +155,14 @@ def fetch_gfswave(date_str, cycle, fhour, lat, lon):
         resp = requests.get(url, timeout=30)
         if resp.status_code == 200 and len(resp.content) > 100:
             return resp.content
-    except Exception as e:
+    except:
         pass
     return None
 
 def parse_grib_data(grib_bytes, lat, lon):
     """
     GRIB2 바이트 데이터를 파싱하여 지정 좌표의 값 추출
+    cfgrib의 다양한 filter 조합을 시도하여 모든 변수 추출
     """
     if grib_bytes is None or len(grib_bytes) < 100:
         return {}
@@ -176,117 +176,162 @@ def parse_grib_data(grib_bytes, lat, lon):
             temp_path = f.name
         
         try:
-            # cfgrib은 여러 메시지가 있을 때 filter_by_keys로 구분
-            # 먼저 모든 데이터셋을 읽어보기
-            datasets = []
-            
             # 다양한 typeOfLevel로 시도
-            for type_of_level in ['surface', 'meanSea', 'orderedSequence', None]:
+            filter_configs = [
+                {'typeOfLevel': 'surface'},
+                {'typeOfLevel': 'meanSea'},
+                {'typeOfLevel': 'orderedSequence'},
+                {},  # no filter - 모든 것 시도
+            ]
+            
+            for filter_keys in filter_configs:
                 try:
-                    if type_of_level:
+                    if filter_keys:
                         ds = xr.open_dataset(temp_path, engine='cfgrib',
-                                           backend_kwargs={'filter_by_keys': {'typeOfLevel': type_of_level}})
+                                           backend_kwargs={'filter_by_keys': filter_keys,
+                                                          'errors': 'ignore'})
                     else:
-                        ds = xr.open_dataset(temp_path, engine='cfgrib')
-                    datasets.append(ds)
+                        ds = xr.open_dataset(temp_path, engine='cfgrib',
+                                           backend_kwargs={'errors': 'ignore'})
                 except:
                     continue
-            
-            # 각 데이터셋에서 변수 추출
-            for ds in datasets:
+                
+                if ds is None:
+                    continue
+                    
                 # 좌표 찾기
                 lat_name = 'latitude' if 'latitude' in ds.coords else 'lat'
                 lon_name = 'longitude' if 'longitude' in ds.coords else 'lon'
                 
                 if lat_name not in ds.coords or lon_name not in ds.coords:
+                    ds.close()
                     continue
                 
                 # 가장 가까운 포인트 선택
                 try:
                     point = ds.sel({lat_name: lat, lon_name: lon}, method='nearest')
                 except:
+                    ds.close()
                     continue
                 
-                # 변수 추출
+                # 변수 추출 - cfgrib 변수명 매핑
                 var_mapping = {
+                    # Atmosphere
                     'prmsl': 'pressure',      # Pa -> hPa 변환 필요
                     'gust': 'gust',           # m/s
-                    'u10': 'wind_u',          # m/s (10m wind)
-                    'v10': 'wind_v',          # m/s (10m wind)
-                    'u': 'wind_u',            # m/s (surface wind from wave model)
+                    # Wave model - wind
+                    'wind': 'wind_speed',     # m/s (직접 풍속)
+                    'wdir': 'wind_dir',       # degrees (직접 풍향)
+                    'u': 'wind_u',            # m/s
                     'v': 'wind_v',            # m/s
+                    'u10': 'wind_u',          # m/s (10m)
+                    'v10': 'wind_v',          # m/s (10m)
+                    # Wave model - waves
                     'htsgw': 'wave_height',   # m
+                    'shww': 'wave_height',    # alternative name
                     'dirpw': 'wave_dir',      # degrees
+                    'mdww': 'wave_dir',       # alternative name  
                     'perpw': 'wave_period',   # seconds
+                    'mpww': 'wave_period',    # alternative name
+                    # Wave model - swell (1 in sequence)
                     'swell': 'swell_height',  # m
+                    'shts': 'swell_height',   # alternative name
                     'swdir': 'swell_dir',     # degrees
+                    'mdts': 'swell_dir',      # alternative name
+                    'swper': 'swell_period',  # seconds
+                    'mpts': 'swell_period',   # alternative name
                 }
                 
                 for var in ds.data_vars:
                     var_lower = var.lower()
                     if var_lower in var_mapping:
+                        mapped_key = var_mapping[var_lower]
+                        # 이미 값이 있으면 스킵 (첫 번째 값 유지)
+                        if mapped_key in result:
+                            continue
                         try:
                             val = float(point[var].values)
                             if not np.isnan(val):
-                                result[var_mapping[var_lower]] = val
+                                result[mapped_key] = val
                         except:
                             pass
                 
                 ds.close()
                 
         finally:
-            os.unlink(temp_path)
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
             
     except Exception as e:
         pass
     
     return result
 
-def fetch_all_forecasts(date_str, cycle, cycle_time, lat, lon, progress_bar, status_text):
+def fetch_single_forecast(args):
     """
-    모든 예보 시간에 대해 데이터 수집
+    단일 예보 시간 데이터 가져오기 (병렬 처리용)
+    """
+    date_str, cycle, cycle_time, fhour, lat, lon = args
+    
+    # 예보 시각 계산
+    valid_time = cycle_time + timedelta(hours=fhour)
+    
+    row = {
+        'valid_time': valid_time,
+        'fhour': fhour,
+    }
+    
+    # Atmosphere 데이터 (기압, 돌풍)
+    atmos_data = fetch_gfs_atmosphere(date_str, cycle, fhour, lat, lon)
+    atmos_parsed = parse_grib_data(atmos_data, lat, lon)
+    
+    # Wave 데이터 (바람, 파도, 스웰)
+    wave_data = fetch_gfswave(date_str, cycle, fhour, lat, lon)
+    wave_parsed = parse_grib_data(wave_data, lat, lon)
+    
+    # 데이터 병합
+    row.update(atmos_parsed)
+    row.update(wave_parsed)
+    
+    return row
+
+def fetch_all_forecasts_parallel(date_str, cycle, cycle_time, lat, lon, progress_bar, status_text):
+    """
+    모든 예보 시간에 대해 병렬로 데이터 수집
     """
     forecast_hours = get_forecast_hours()
     all_data = []
     
     total = len(forecast_hours)
-    successful = 0
+    completed = 0
     
-    for i, fhour in enumerate(forecast_hours):
-        progress_bar.progress((i + 1) / total)
-        status_text.text(f"데이터 수신 중... f{fhour:03d} ({i+1}/{total})")
-        
-        # 예보 시각 계산
-        valid_time = cycle_time + timedelta(hours=fhour)
-        
-        row = {
-            'valid_time': valid_time,
-            'fhour': fhour,
-        }
-        
-        # Atmosphere 데이터 (기압, 돌풍)
-        atmos_data = fetch_gfs_atmosphere(date_str, cycle, fhour, lat, lon)
-        atmos_parsed = parse_grib_data(atmos_data, lat, lon)
-        
-        # Wave 데이터 (바람, 파도, 스웰)
-        wave_data = fetch_gfswave(date_str, cycle, fhour, lat, lon)
-        wave_parsed = parse_grib_data(wave_data, lat, lon)
-        
-        # 데이터 병합
-        row.update(atmos_parsed)
-        row.update(wave_parsed)
-        
-        # 최소한 일부 데이터가 있으면 추가
-        if len(row) > 2:
-            all_data.append(row)
-            successful += 1
-        
-        # 120시간 이후 데이터가 없으면 중단
-        if fhour > 120 and len(row) <= 2:
-            status_text.text(f"f{fhour:03d} 이후 데이터 없음, 수집 완료")
-            break
+    # 병렬 요청 인자 준비
+    args_list = [(date_str, cycle, cycle_time, fhour, lat, lon) for fhour in forecast_hours]
     
-    return all_data, successful
+    # ThreadPoolExecutor로 병렬 실행 (최대 10개 동시 요청)
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_single_forecast, args): args[3] for args in args_list}
+        
+        for future in as_completed(futures):
+            fhour = futures[future]
+            completed += 1
+            progress_bar.progress(completed / total)
+            status_text.text(f"데이터 수신 중... ({completed}/{total})")
+            
+            try:
+                row = future.result()
+                # 최소한 일부 데이터가 있으면 추가
+                if len(row) > 2:
+                    all_data.append(row)
+            except:
+                pass
+    
+    # fhour 기준으로 정렬
+    all_data.sort(key=lambda x: x['fhour'])
+    
+    return all_data, len(all_data)
 
 # ============================================================
 # 4. UI 상단
@@ -325,7 +370,7 @@ if fetch_btn or 'data_loaded' in st.session_state:
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        all_data, successful = fetch_all_forecasts(
+        all_data, successful = fetch_all_forecasts_parallel(
             date_str, cycle, cycle_time, 
             st.session_state.lat, st.session_state.lon,
             progress_bar, status_text
@@ -343,9 +388,13 @@ if fetch_btn or 'data_loaded' in st.session_state:
             # DataFrame 생성
             df = pd.DataFrame(all_data)
             
-            # 시간대 적용
+            # 시간대 적용 및 포맷팅
             time_col = f"Time (UTC{st.session_state.offset:+})"
-            df[time_col] = df['valid_time'] + timedelta(hours=(st.session_state.offset - 0))  # UTC 기준
+            # UTC 시간에 offset 적용하고, +00:00 제거를 위해 naive datetime으로 변환
+            df['local_time'] = df['valid_time'].apply(
+                lambda x: (x + timedelta(hours=st.session_state.offset)).replace(tzinfo=None)
+            )
+            df[time_col] = df['local_time'].dt.strftime('%Y-%m-%d %H:%M')
             
             # 기압 변환 (Pa -> hPa)
             if 'pressure' in df.columns:
@@ -353,18 +402,26 @@ if fetch_btn or 'data_loaded' in st.session_state:
             else:
                 df['Pressure(hPa)'] = np.nan
             
-            # 바람 계산
-            if 'wind_u' in df.columns and 'wind_v' in df.columns:
+            # 바람 계산 - wind_speed/wind_dir 직접 사용 우선, 없으면 u/v 계산
+            if 'wind_speed' in df.columns:
+                df['Wind Speed(kts)'] = (df['wind_speed'] * MS_TO_KNOTS).round(1)
+            elif 'wind_u' in df.columns and 'wind_v' in df.columns:
                 df['Wind Speed(kts)'] = (np.sqrt(df['wind_u']**2 + df['wind_v']**2) * MS_TO_KNOTS).round(1)
-                df['Wind_Deg'] = (np.degrees(np.arctan2(df['wind_u'], df['wind_v'])) + 180) % 360
-                df['Wind Direction'] = df.apply(
-                    lambda r: f"{r['Wind_Deg']:.1f}° {get_direction_text(r['Wind_Deg'])} {get_arrow_html(r['Wind_Deg'])}", 
-                    axis=1
-                )
             else:
                 df['Wind Speed(kts)'] = np.nan
+            
+            if 'wind_dir' in df.columns:
+                df['Wind_Deg'] = df['wind_dir']
+            elif 'wind_u' in df.columns and 'wind_v' in df.columns:
+                df['Wind_Deg'] = (np.degrees(np.arctan2(df['wind_u'], df['wind_v'])) + 180) % 360
+            else:
                 df['Wind_Deg'] = np.nan
-                df['Wind Direction'] = '-'
+            
+            df['Wind Direction'] = df.apply(
+                lambda r: f"{r['Wind_Deg']:.1f}° {get_direction_text(r['Wind_Deg'])} {get_arrow_html(r['Wind_Deg'])}" 
+                if pd.notna(r['Wind_Deg']) else '-',
+                axis=1
+            )
             
             # 돌풍 변환
             if 'gust' in df.columns:
@@ -414,6 +471,12 @@ if fetch_btn or 'data_loaded' in st.session_state:
                 df['Swell_Deg'] = np.nan
                 df['Swell Direction'] = '-'
             
+            # 스웰 주기
+            if 'swell_period' in df.columns:
+                df['Swell Period(s)'] = df['swell_period'].round(1)
+            else:
+                df['Swell Period(s)'] = np.nan
+            
             # ============================================================
             # 탭 표시
             # ============================================================
@@ -428,7 +491,7 @@ if fetch_btn or 'data_loaded' in st.session_state:
                     time_col, "Pressure(hPa)", 
                     "Wind Direction", "Wind Speed(kts)", "Gust(kts)", 
                     "Wave Direction", "Waves(m)", "Max Waves(m)", "Wave Period(s)",
-                    "Swell Direction", "Swell(m)"
+                    "Swell Direction", "Swell(m)", "Swell Period(s)"
                 ]
                 
                 # 존재하는 컬럼만 선택
@@ -449,17 +512,20 @@ if fetch_btn or 'data_loaded' in st.session_state:
                     subplot_titles=("Wind Speed & Direction (kts)", "Wave Height & Direction (m)")
                 )
                 
+                # 그래프용 시간축 (datetime 객체 사용)
+                graph_time = df['local_time']
+                
                 # 상단: 바람
                 if 'Wind Speed(kts)' in df.columns:
                     fig.add_trace(
-                        go.Scatter(x=df[time_col], y=df['Wind Speed(kts)'], 
+                        go.Scatter(x=graph_time, y=df['Wind Speed(kts)'], 
                                   name="Wind", line=dict(color='firebrick')), 
                         row=1, col=1
                     )
                 
                 if 'Gust(kts)' in df.columns:
                     fig.add_trace(
-                        go.Scatter(x=df[time_col], y=df['Gust(kts)'], 
+                        go.Scatter(x=graph_time, y=df['Gust(kts)'], 
                                   name="Gust", line=dict(color='orange', dash='dot'), fill='tonexty'), 
                         row=1, col=1
                     )
@@ -467,11 +533,11 @@ if fetch_btn or 'data_loaded' in st.session_state:
                 # 바람 방향 화살표
                 if 'Wind_Deg' in df.columns and 'Wind Speed(kts)' in df.columns:
                     wind_max = df['Wind Speed(kts)'].max()
-                    if pd.notna(wind_max):
+                    if pd.notna(wind_max) and wind_max > 0:
                         for i in range(len(df)):
                             if pd.notna(df['Wind_Deg'].iloc[i]):
                                 fig.add_annotation(
-                                    dict(x=df[time_col].iloc[i], y=wind_max * 1.2, 
+                                    dict(x=graph_time.iloc[i], y=wind_max * 1.2, 
                                          text="↑", showarrow=False,
                                          font=dict(size=12, color="#007BFF"), 
                                          textangle=df['Wind_Deg'].iloc[i]+180, 
@@ -481,21 +547,21 @@ if fetch_btn or 'data_loaded' in st.session_state:
                 # 하단: 파도
                 if 'Waves(m)' in df.columns:
                     fig.add_trace(
-                        go.Scatter(x=df[time_col], y=df['Waves(m)'], 
+                        go.Scatter(x=graph_time, y=df['Waves(m)'], 
                                   name="Waves", line=dict(color='royalblue', width=3)), 
                         row=2, col=1
                     )
                 
                 if 'Max Waves(m)' in df.columns:
                     fig.add_trace(
-                        go.Scatter(x=df[time_col], y=df['Max Waves(m)'], 
+                        go.Scatter(x=graph_time, y=df['Max Waves(m)'], 
                                   name="Max Waves", line=dict(color='navy', width=1, dash='dot')), 
                         row=2, col=1
                     )
                 
                 if 'Swell(m)' in df.columns:
                     fig.add_trace(
-                        go.Scatter(x=df[time_col], y=df['Swell(m)'], 
+                        go.Scatter(x=graph_time, y=df['Swell(m)'], 
                                   name="Swell", line=dict(color='skyblue', dash='dash')), 
                         row=2, col=1
                     )
@@ -503,11 +569,11 @@ if fetch_btn or 'data_loaded' in st.session_state:
                 # 파도 방향 화살표
                 if 'Wave_Deg' in df.columns and 'Max Waves(m)' in df.columns:
                     y_max_wave = df['Max Waves(m)'].max()
-                    if pd.notna(y_max_wave):
+                    if pd.notna(y_max_wave) and y_max_wave > 0:
                         for i in range(len(df)):
                             if pd.notna(df['Wave_Deg'].iloc[i]):
                                 fig.add_annotation(
-                                    dict(x=df[time_col].iloc[i], y=y_max_wave * 1.2, 
+                                    dict(x=graph_time.iloc[i], y=y_max_wave * 1.2, 
                                          text="↑", showarrow=False,
                                          font=dict(size=12, color="#28A745"), 
                                          textangle=df['Wave_Deg'].iloc[i]+180, 
@@ -515,7 +581,7 @@ if fetch_btn or 'data_loaded' in st.session_state:
                                 )
                 
                 # 날짜 구분 배경
-                for i, day in enumerate(df[time_col].dt.date.unique()):
+                for i, day in enumerate(graph_time.dt.date.unique()):
                     if i % 2 == 0:
                         fig.add_vrect(
                             x0=str(day), x1=str(day + timedelta(days=1)), 
@@ -533,12 +599,12 @@ if fetch_btn or 'data_loaded' in st.session_state:
                 # Y축 범위 설정
                 if 'Wind Speed(kts)' in df.columns:
                     wind_max = df['Wind Speed(kts)'].max()
-                    if pd.notna(wind_max):
+                    if pd.notna(wind_max) and wind_max > 0:
                         fig.update_yaxes(range=[0, wind_max * 1.4], row=1, col=1)
                 
                 if 'Max Waves(m)' in df.columns:
                     wave_max = df['Max Waves(m)'].max()
-                    if pd.notna(wave_max):
+                    if pd.notna(wave_max) and wave_max > 0:
                         fig.update_yaxes(range=[0, wave_max * 1.4], row=2, col=1)
                 
                 st.plotly_chart(fig, use_container_width=True)
